@@ -1,0 +1,70 @@
+services:
+  control-plane:
+    build: .
+    ports:
+      - "8080:8080"   # REST API
+      - "4320:4320"   # OpAMP
+    environment:
+      - GIT_REPO_URL=
+      - GIT_USERNAME=
+      - GIT_PASSWORD=
+      - GIT_WEBHOOK_SECRET=
+    volumes:
+      - ./data:/app/data
+      - ./example-configs:/app/data/configs
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Example OTel Collector with OpAMP supervisor
+  otel-collector:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.115.0
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./example-configs/local-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics
+
+  # OpAMP Supervisor for the collector
+  opamp-supervisor:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.115.0
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/supervisor.yaml << 'EOF'
+        server:
+          endpoint: ws://control-plane:4320/v1/opamp
+
+        agent:
+          executable: /otelcol-contrib
+          description:
+            identifying_attributes:
+              service.name: otel-collector
+              service.namespace: demo
+              deployment: docker
+              role: gateway
+
+        storage:
+          directory: /tmp/supervisor
+
+        capabilities:
+          reports_effective_config: true
+          reports_health: true
+          reports_own_metrics: true
+          accepts_remote_config: true
+        EOF
+        mkdir -p /tmp/supervisor
+        exec /otelcol-contrib --config /tmp/supervisor.yaml
+    ports:
+      - "4319:4317"
+      - "4320:4318"

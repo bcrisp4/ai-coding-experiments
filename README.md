@@ -12,8 +12,4 @@ This is a monolithic repo. Each project lives in its own subdirectory at the roo
 
 ## Projects
 
-*No projects yet.*
-
-<!-- Add projects here as they are created:
-- [project-name](./project-name) - Brief description
--->
+- [opamp-control-plane](./opamp-control-plane) - OpAMP GitOps control plane for managing OpenTelemetry Collector configurations across Kubernetes and VMs using Git as the source of truth

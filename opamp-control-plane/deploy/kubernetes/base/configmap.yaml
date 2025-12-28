@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opamp-control-plane-config
+  namespace: opamp-system
+  labels:
+    app.kubernetes.io/name: opamp-control-plane
+data:
+  server.yaml: |
+    server:
+      http_addr: ":8080"
+      opamp_addr: ":4320"
+
+    storage:
+      type: "sqlite"
+      sqlite:
+        path: "/data/opamp.db"
+
+    git:
+      repo_url: ""
+      branch: "main"
+      poll_interval: "60s"
+      local_path: "/data/configs"
+
+    validation:
+      enabled: true
+      strict_otel_schema: false
+
+    logging:
+      level: "info"
+      format: "json"
