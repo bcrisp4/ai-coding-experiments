@@ -1,22 +1,26 @@
-name: CI
+name: OpAMP Control Plane CI
 
 on:
   push:
     branches:
       - main
     paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/ci.yaml'
+      - 'opamp-control-plane/**.go'
+      - 'opamp-control-plane/go.mod'
+      - 'opamp-control-plane/go.sum'
+      - '.github/workflows/opamp-ci.yaml'
   pull_request:
     branches:
       - main
     paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/ci.yaml'
+      - 'opamp-control-plane/**.go'
+      - 'opamp-control-plane/go.mod'
+      - 'opamp-control-plane/go.sum'
+      - '.github/workflows/opamp-ci.yaml'
+
+defaults:
+  run:
+    working-directory: opamp-control-plane
 
 permissions:
   contents: read
@@ -34,6 +38,7 @@ jobs:
         with:
           go-version: '1.23'
           cache: true
+          cache-dependency-path: opamp-control-plane/go.sum
 
       - name: Download dependencies
         run: go mod download
@@ -50,7 +55,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.out
+          file: opamp-control-plane/coverage.out
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
@@ -67,11 +72,13 @@ jobs:
         with:
           go-version: '1.23'
           cache: true
+          cache-dependency-path: opamp-control-plane/go.sum
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          working-directory: opamp-control-plane
           args: --timeout=5m
 
   build:
@@ -94,6 +101,7 @@ jobs:
         with:
           go-version: '1.23'
           cache: true
+          cache-dependency-path: opamp-control-plane/go.sum
 
       - name: Build binary
         env:
@@ -110,5 +118,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: opamp-control-plane-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/
+          path: opamp-control-plane/dist/
           retention-days: 7

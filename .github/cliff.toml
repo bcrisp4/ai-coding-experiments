@@ -41,5 +41,6 @@ commit_parsers = [
 ]
 protect_breaking_commits = false
 filter_commits = false
-tag_pattern = "v[0-9].*"
+# Support both simple tags (v1.0.0) and project-prefixed tags (project/v1.0.0)
+tag_pattern = "(.*/)?(v[0-9].*)"
 sort_commits = "oldest"

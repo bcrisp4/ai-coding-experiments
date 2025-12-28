@@ -1,8 +1,8 @@
 version: 2
 updates:
-  # Go modules
+  # Go modules for opamp-control-plane
   - package-ecosystem: "gomod"
-    directory: "/"
+    directory: "/opamp-control-plane"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -12,7 +12,7 @@ updates:
         patterns:
           - "*"
     commit-message:
-      prefix: "deps"
+      prefix: "deps(opamp)"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -28,12 +28,12 @@ updates:
     commit-message:
       prefix: "ci"
 
-  # Docker
+  # Docker for opamp-control-plane
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/opamp-control-plane"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "docker"
+      prefix: "docker(opamp)"
