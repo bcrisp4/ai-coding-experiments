@@ -1,0 +1,23 @@
+# Binaries
+opamp-control-plane
+*.exe
+
+# Data directory
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test_client.go
+
+# Temporary files
+*.tmp
+*.bak
