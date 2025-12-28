@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,9 @@ import (
 	"github.com/bcrisp4/opamp-control-plane/internal/registry"
 	"github.com/bcrisp4/opamp-control-plane/pkg/models"
 )
+
+// Version is set at build time via -ldflags.
+var Version = "dev"
 
 // Config represents the server configuration.
 type Config struct {
@@ -59,7 +63,13 @@ type Config struct {
 
 func main() {
 	configPath := flag.String("config", "configs/server.yaml", "Path to configuration file")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("opamp-control-plane version %s\n", Version)
+		os.Exit(0)
+	}
 
 	// Load configuration
 	cfg, err := loadConfig(*configPath)
@@ -72,6 +82,7 @@ func main() {
 	logger := setupLogger(cfg.Logging.Level, cfg.Logging.Format)
 
 	logger.Info("starting OpAMP control plane",
+		"version", Version,
 		"http_addr", cfg.Server.HTTPAddr,
 		"opamp_addr", cfg.Server.OpAMPAddr,
 	)

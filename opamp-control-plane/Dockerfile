@@ -1,6 +1,8 @@
 # Build stage
 FROM golang:1.23-alpine AS builder
 
+ARG VERSION=dev
+
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
@@ -13,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /opamp-control-plane ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s -X main.Version=${VERSION}" -o /opamp-control-plane ./cmd/server
 
 # Runtime stage
 FROM alpine:3.20
