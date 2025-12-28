@@ -48,9 +48,9 @@ type OTelConfig struct {
 
 // ServiceConfig represents the service section of an OTel Collector config.
 type ServiceConfig struct {
-	Extensions []string              `yaml:"extensions"`
-	Pipelines  map[string]*Pipeline  `yaml:"pipelines"`
-	Telemetry  map[string]any        `yaml:"telemetry"`
+	Extensions []string             `yaml:"extensions"`
+	Pipelines  map[string]*Pipeline `yaml:"pipelines"`
+	Telemetry  map[string]any       `yaml:"telemetry"`
 }
 
 // Pipeline represents a telemetry pipeline.
@@ -73,7 +73,7 @@ func (v *DefaultValidator) ValidateOTelConfig(content []byte) error {
 	}
 
 	// Validate pipelines exist
-	if config.Service.Pipelines == nil || len(config.Service.Pipelines) == 0 {
+	if len(config.Service.Pipelines) == 0 {
 		return fmt.Errorf("no pipelines defined in service section")
 	}
 

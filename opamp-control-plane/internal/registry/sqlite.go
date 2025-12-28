@@ -199,7 +199,10 @@ func (r *SQLiteRegistry) UpdateAgent(ctx context.Context, agent *models.Agent) e
 		return fmt.Errorf("failed to update agent: %w", err)
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent not found: %s", agent.InstanceUID)
 	}
@@ -373,7 +376,10 @@ func (r *SQLiteRegistry) ListAgents(ctx context.Context, filter models.AgentFilt
 			agent.EffectiveConfigHash = effectiveConfigHash.String
 		}
 
-		// Apply label filter in memory (could be optimized with JSON functions)
+		// Apply label filter in memory
+		// Note: This could be optimized using SQLite's JSON functions (json_extract),
+		// but the current approach is acceptable for moderate numbers of agents.
+		// For large-scale deployments, consider migrating to a dedicated labels table.
 		if len(filter.Labels) > 0 {
 			match := true
 			for k, v := range filter.Labels {
@@ -400,7 +406,10 @@ func (r *SQLiteRegistry) DeleteAgent(ctx context.Context, instanceUID string) er
 		return fmt.Errorf("failed to delete agent: %w", err)
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent not found: %s", instanceUID)
 	}
@@ -419,12 +428,18 @@ func (r *SQLiteRegistry) UpdateAgentStatus(ctx context.Context, instanceUID stri
 		return fmt.Errorf("failed to update agent status: %w", err)
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent not found: %s", instanceUID)
 	}
 
-	agent, _ := r.GetAgent(ctx, instanceUID)
+	agent, err := r.GetAgent(ctx, instanceUID)
+	if err != nil {
+		r.logger.Warn("failed to get agent for event emission", "instance_uid", instanceUID, "error", err)
+	}
 	if agent != nil {
 		eventType := EventAgentUpdated
 		if status == models.AgentStatusDisconnected {
@@ -453,12 +468,18 @@ func (r *SQLiteRegistry) UpdateAgentConfigStatus(ctx context.Context, instanceUI
 		return fmt.Errorf("failed to update agent config status: %w", err)
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent not found: %s", instanceUID)
 	}
 
-	agent, _ := r.GetAgent(ctx, instanceUID)
+	agent, err := r.GetAgent(ctx, instanceUID)
+	if err != nil {
+		r.logger.Warn("failed to get agent for event emission", "instance_uid", instanceUID, "error", err)
+	}
 	if agent != nil {
 		eventType := EventConfigApplied
 		if status == models.ConfigStatusFailed {

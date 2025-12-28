@@ -3,6 +3,7 @@ package gitsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -135,7 +136,7 @@ func (s *Syncer) Sync(ctx context.Context) (string, error) {
 			SingleBranch:  true,
 		})
 
-		if err != nil && err != git.NoErrAlreadyUpToDate {
+		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return "", fmt.Errorf("failed to pull: %w", err)
 		}
 
@@ -239,7 +240,10 @@ func (s *Syncer) pollLoop(ctx context.Context) {
 // Stop stops the periodic sync.
 func (s *Syncer) Stop() {
 	close(s.stopCh)
-	<-s.doneCh
+	// Only wait for doneCh if polling was enabled (doneCh will be closed by pollLoop)
+	if s.pollInterval > 0 {
+		<-s.doneCh
+	}
 }
 
 // GetLocalPath returns the local repository path.

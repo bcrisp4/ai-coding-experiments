@@ -18,10 +18,10 @@ const (
 type ConfigStatus string
 
 const (
-	ConfigStatusPending  ConfigStatus = "pending"
-	ConfigStatusApplied  ConfigStatus = "applied"
-	ConfigStatusFailed   ConfigStatus = "failed"
-	ConfigStatusUnknown  ConfigStatus = "unknown"
+	ConfigStatusPending ConfigStatus = "pending"
+	ConfigStatusApplied ConfigStatus = "applied"
+	ConfigStatusFailed  ConfigStatus = "failed"
+	ConfigStatusUnknown ConfigStatus = "unknown"
 )
 
 // Agent represents a managed telemetry agent.
@@ -86,11 +86,11 @@ type AgentFilter struct {
 
 // ConfigSelector defines a label-based config assignment rule.
 type ConfigSelector struct {
-	Name    string            `yaml:"name" json:"name"`
-	Match   SelectorMatch     `yaml:"match" json:"match"`
-	Config  string            `yaml:"config" json:"config"`
-	Overlay string            `yaml:"overlay,omitempty" json:"overlay,omitempty"`
-	Priority int              `yaml:"priority,omitempty" json:"priority,omitempty"`
+	Name     string        `yaml:"name" json:"name"`
+	Match    SelectorMatch `yaml:"match" json:"match"`
+	Config   string        `yaml:"config" json:"config"`
+	Overlay  string        `yaml:"overlay,omitempty" json:"overlay,omitempty"`
+	Priority int           `yaml:"priority,omitempty" json:"priority,omitempty"`
 }
 
 // SelectorMatch defines the matching criteria for a selector.
@@ -105,9 +105,9 @@ type SelectorsFile struct {
 
 // EffectiveConfig represents the resolved configuration for an agent.
 type EffectiveConfig struct {
-	Name        string `json:"name"`
-	Hash        string `json:"hash"`
-	Content     []byte `json:"content"`
+	Name         string `json:"name"`
+	Hash         string `json:"hash"`
+	Content      []byte `json:"content"`
 	SelectorName string `json:"selector_name"`
 }
 

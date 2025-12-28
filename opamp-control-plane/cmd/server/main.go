@@ -51,7 +51,7 @@ type Config struct {
 	} `yaml:"git"`
 
 	Validation struct {
-		Enabled         bool `yaml:"enabled"`
+		Enabled          bool `yaml:"enabled"`
 		StrictOTelSchema bool `yaml:"strict_otel_schema"`
 	} `yaml:"validation"`
 
@@ -160,7 +160,10 @@ func main() {
 				return err
 			}
 			// Push to all connected agents
-			opampServer.PushConfigToAll(ctx)
+			if err := opampServer.PushConfigToAll(ctx); err != nil {
+				logger.Error("failed to push configs to agents", "error", err)
+				return err
+			}
 			return nil
 		})
 
@@ -208,8 +211,9 @@ func main() {
 
 	// Start HTTP server
 	httpServer := &http.Server{
-		Addr:    cfg.Server.HTTPAddr,
-		Handler: mux,
+		Addr:              cfg.Server.HTTPAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {

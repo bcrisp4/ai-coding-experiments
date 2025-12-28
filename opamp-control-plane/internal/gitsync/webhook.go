@@ -91,7 +91,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "ok"}`))
+	_, _ = w.Write([]byte(`{"status": "ok"}`))
 }
 
 // handlePush processes a push event.

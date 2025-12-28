@@ -212,7 +212,11 @@ func (s *Server) handleConnectionClose(conn types.Connection) {
 	var instanceUID string
 	s.connections.Range(func(key, value any) bool {
 		if value == conn {
-			instanceUID = key.(string)
+			var ok bool
+			instanceUID, ok = key.(string)
+			if !ok {
+				return true
+			}
 			return false
 		}
 		return true
@@ -295,7 +299,10 @@ func (s *Server) PushConfigToAgent(ctx context.Context, instanceUID string) erro
 		return nil // Agent not connected
 	}
 
-	conn := connVal.(types.Connection)
+	conn, ok := connVal.(types.Connection)
+	if !ok {
+		return nil // Invalid connection type
+	}
 	s.sendConfigToAgent(ctx, conn, agent)
 	return nil
 }
@@ -349,8 +356,14 @@ func (s *Server) sendConfigToAgent(ctx context.Context, conn types.Connection, a
 // PushConfigToAll pushes configs to all connected agents.
 func (s *Server) PushConfigToAll(ctx context.Context) error {
 	s.connections.Range(func(key, value any) bool {
-		instanceUID := key.(string)
-		conn := value.(types.Connection)
+		instanceUID, ok := key.(string)
+		if !ok {
+			return true
+		}
+		conn, ok := value.(types.Connection)
+		if !ok {
+			return true
+		}
 
 		agent, err := s.registry.GetAgent(ctx, instanceUID)
 		if err != nil {

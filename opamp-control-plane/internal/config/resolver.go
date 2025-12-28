@@ -22,17 +22,17 @@ type Resolver struct {
 	validator Validator
 	logger    *slog.Logger
 
-	mu          sync.RWMutex
-	baseConfig  []byte
-	overlays    map[string][]byte // overlay name -> content
+	mu           sync.RWMutex
+	baseConfig   []byte
+	overlays     map[string][]byte // overlay name -> content
 	agentConfigs map[string][]byte // config path -> content
 }
 
 // ResolverConfig contains configuration for the resolver.
 type ResolverConfig struct {
-	ConfigDir    string
-	Validator    Validator
-	Logger       *slog.Logger
+	ConfigDir string
+	Validator Validator
+	Logger    *slog.Logger
 }
 
 // NewResolver creates a new config resolver.
@@ -106,15 +106,16 @@ func (r *Resolver) LoadConfigs() error {
 
 	// Load selectors
 	selectorsPath := filepath.Join(agentsDir, "_selectors.yaml")
-	if data, err := os.ReadFile(selectorsPath); err == nil {
+	selectorsData, readErr := os.ReadFile(selectorsPath)
+	if readErr == nil {
 		var sf models.SelectorsFile
-		if err := yaml.Unmarshal(data, &sf); err != nil {
-			return fmt.Errorf("failed to parse selectors file: %w", err)
+		if unmarshalErr := yaml.Unmarshal(selectorsData, &sf); unmarshalErr != nil {
+			return fmt.Errorf("failed to parse selectors file: %w", unmarshalErr)
 		}
 		r.matcher.UpdateSelectors(sf.Selectors)
 		r.logger.Info("loaded selectors", "count", len(sf.Selectors))
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read selectors file: %w", err)
+	} else if !os.IsNotExist(readErr) {
+		return fmt.Errorf("failed to read selectors file: %w", readErr)
 	}
 
 	return nil
