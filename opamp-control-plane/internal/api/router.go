@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 )
 
 // NewRouter creates a new HTTP router with all API routes.
@@ -40,12 +41,69 @@ func WithLogging(handler http.Handler, logger interface{ Info(string, ...any) })
 	})
 }
 
-// WithCORS adds CORS headers to responses.
-func WithCORS(handler http.Handler) http.Handler {
+// CORSConfig configures CORS behavior.
+type CORSConfig struct {
+	// AllowedOrigins is a list of origins that are allowed.
+	// Use "*" to allow all origins (not recommended for production).
+	// If empty, CORS headers are not added.
+	AllowedOrigins []string
+
+	// AllowedMethods is a list of allowed HTTP methods.
+	// Defaults to GET, POST, PUT, DELETE, OPTIONS if empty.
+	AllowedMethods []string
+
+	// AllowedHeaders is a list of allowed headers.
+	// Defaults to Content-Type, Authorization if empty.
+	AllowedHeaders []string
+}
+
+// WithCORS adds CORS headers to responses based on configuration.
+func WithCORS(handler http.Handler, cfg CORSConfig) http.Handler {
+	// If no origins configured, return handler without CORS
+	if len(cfg.AllowedOrigins) == 0 {
+		return handler
+	}
+
+	methods := cfg.AllowedMethods
+	if len(methods) == 0 {
+		methods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	}
+
+	headers := cfg.AllowedHeaders
+	if len(headers) == 0 {
+		headers = []string{"Content-Type", "Authorization"}
+	}
+
+	methodsStr := strings.Join(methods, ", ")
+	headersStr := strings.Join(headers, ", ")
+
+	// Check if wildcard origin is allowed
+	allowAll := false
+	for _, o := range cfg.AllowedOrigins {
+		if o == "*" {
+			allowAll = true
+			break
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		origin := r.Header.Get("Origin")
+
+		if allowAll {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin != "" {
+			// Check if origin is in allowed list
+			for _, allowed := range cfg.AllowedOrigins {
+				if origin == allowed {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+					break
+				}
+			}
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", methodsStr)
+		w.Header().Set("Access-Control-Allow-Headers", headersStr)
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

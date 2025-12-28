@@ -3,6 +3,7 @@ package opamp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -56,11 +57,11 @@ type loggerAdapter struct {
 }
 
 func (l *loggerAdapter) Debugf(ctx context.Context, format string, args ...interface{}) {
-	l.logger.DebugContext(ctx, format, args...)
+	l.logger.DebugContext(ctx, fmt.Sprintf(format, args...))
 }
 
 func (l *loggerAdapter) Errorf(ctx context.Context, format string, args ...interface{}) {
-	l.logger.ErrorContext(ctx, format, args...)
+	l.logger.ErrorContext(ctx, fmt.Sprintf(format, args...))
 }
 
 // connectionCallbacks implements types.ConnectionCallbacks for a specific connection.
@@ -192,7 +193,9 @@ func (s *Server) handleMessage(ctx context.Context, conn types.Connection, msg *
 			}
 
 			// Update the expected config hash
-			s.registry.UpdateAgentConfigStatus(ctx, instanceUID, effectiveConfig.Hash, models.ConfigStatusPending)
+			if err := s.registry.UpdateAgentConfigStatus(ctx, instanceUID, effectiveConfig.Hash, models.ConfigStatusPending); err != nil {
+				s.logger.Error("failed to update config status", "instance_uid", instanceUID, "error", err)
+			}
 			s.logger.Info("sending config to agent",
 				"instance_uid", instanceUID,
 				"config_name", effectiveConfig.Name,
@@ -334,7 +337,9 @@ func (s *Server) sendConfigToAgent(ctx context.Context, conn types.Connection, a
 		return
 	}
 
-	s.registry.UpdateAgentConfigStatus(ctx, agent.InstanceUID, effectiveConfig.Hash, models.ConfigStatusPending)
+	if err := s.registry.UpdateAgentConfigStatus(ctx, agent.InstanceUID, effectiveConfig.Hash, models.ConfigStatusPending); err != nil {
+		s.logger.Error("failed to update config status after send", "instance_uid", agent.InstanceUID, "error", err)
+	}
 	s.logger.Info("sent config to agent",
 		"instance_uid", agent.InstanceUID,
 		"config_name", effectiveConfig.Name,

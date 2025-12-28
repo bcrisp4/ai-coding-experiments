@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/bcrisp4/opamp-control-plane/internal/config"
@@ -13,6 +14,11 @@ import (
 	"github.com/bcrisp4/opamp-control-plane/internal/registry"
 	"github.com/bcrisp4/opamp-control-plane/pkg/models"
 )
+
+// instanceUIDPattern validates instance UID format.
+// Allows alphanumeric characters, hyphens, underscores, and periods.
+// Must be 1-256 characters long.
+var instanceUIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,256}$`)
 
 // Handlers contains the API handler dependencies.
 type Handlers struct {
@@ -63,8 +69,8 @@ func (h *Handlers) GetAgent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	instanceUID := r.PathValue("id")
 
-	if instanceUID == "" {
-		writeError(w, http.StatusBadRequest, "missing agent id")
+	if !validateInstanceUID(instanceUID) {
+		writeError(w, http.StatusBadRequest, "invalid agent id format")
 		return
 	}
 
@@ -88,8 +94,8 @@ func (h *Handlers) GetAgentConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	instanceUID := r.PathValue("id")
 
-	if instanceUID == "" {
-		writeError(w, http.StatusBadRequest, "missing agent id")
+	if !validateInstanceUID(instanceUID) {
+		writeError(w, http.StatusBadRequest, "invalid agent id format")
 		return
 	}
 
@@ -235,8 +241,8 @@ func (h *Handlers) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	instanceUID := r.PathValue("id")
 
-	if instanceUID == "" {
-		writeError(w, http.StatusBadRequest, "missing agent id")
+	if !validateInstanceUID(instanceUID) {
+		writeError(w, http.StatusBadRequest, "invalid agent id format")
 		return
 	}
 
@@ -261,6 +267,14 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func isHealthyStatus(s string) bool {
 	return len(s) > 7 && s[:7] == "healthy"
+}
+
+// validateInstanceUID validates the instance UID format.
+func validateInstanceUID(id string) bool {
+	if id == "" {
+		return false
+	}
+	return instanceUIDPattern.MatchString(id)
 }
 
 // ConfigPusher is used to push configs to agents.

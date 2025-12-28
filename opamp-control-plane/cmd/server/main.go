@@ -59,6 +59,12 @@ type Config struct {
 		Level  string `yaml:"level"`
 		Format string `yaml:"format"`
 	} `yaml:"logging"`
+
+	CORS struct {
+		AllowedOrigins []string `yaml:"allowed_origins"`
+		AllowedMethods []string `yaml:"allowed_methods"`
+		AllowedHeaders []string `yaml:"allowed_headers"`
+	} `yaml:"cors"`
 }
 
 func main() {
@@ -183,7 +189,12 @@ func main() {
 
 	// Mount API routes
 	apiRouter := api.NewRouter(handlers)
-	mux.Handle("/", api.WithCORS(api.WithLogging(apiRouter, logger)))
+	corsConfig := api.CORSConfig{
+		AllowedOrigins: cfg.CORS.AllowedOrigins,
+		AllowedMethods: cfg.CORS.AllowedMethods,
+		AllowedHeaders: cfg.CORS.AllowedHeaders,
+	}
+	mux.Handle("/", api.WithCORS(api.WithLogging(apiRouter, logger), corsConfig))
 
 	// Mount OpAMP endpoint
 	mux.Handle("/v1/opamp", opampServer.Handler())

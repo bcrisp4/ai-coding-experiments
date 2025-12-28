@@ -167,16 +167,36 @@ func (s *Syncer) getCurrentCommit() (string, error) {
 }
 
 // notifyCallbacks calls all registered callbacks.
+// Note: This runs asynchronously after Sync returns.
 func (s *Syncer) notifyCallbacks(commitHash string) {
 	s.mu.RLock()
 	callbacks := make([]SyncCallback, len(s.callbacks))
 	copy(callbacks, s.callbacks)
 	s.mu.RUnlock()
 
+	if len(callbacks) == 0 {
+		return
+	}
+
+	s.logger.Debug("processing sync callbacks", "count", len(callbacks), "commit", commitHash)
+
+	var failedCount int
 	for _, cb := range callbacks {
 		if err := cb(commitHash); err != nil {
-			s.logger.Error("sync callback failed", "error", err)
+			failedCount++
+			s.logger.Error("sync callback failed", "commit", commitHash, "error", err)
 		}
+	}
+
+	if failedCount > 0 {
+		s.logger.Warn("sync callbacks completed with errors",
+			"commit", commitHash,
+			"total", len(callbacks),
+			"failed", failedCount)
+	} else {
+		s.logger.Debug("sync callbacks completed successfully",
+			"commit", commitHash,
+			"count", len(callbacks))
 	}
 }
 

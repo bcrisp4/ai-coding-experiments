@@ -15,10 +15,11 @@ import (
 
 // SQLiteRegistry implements Registry using SQLite.
 type SQLiteRegistry struct {
-	db       *sql.DB
-	logger   *slog.Logger
-	handlers []EventHandler
-	mu       sync.RWMutex
+	db            *sql.DB
+	logger        *slog.Logger
+	handlers      map[int]EventHandler
+	nextHandlerID int
+	mu            sync.RWMutex
 }
 
 // NewSQLiteRegistry creates a new SQLite-backed registry.
@@ -41,8 +42,9 @@ func NewSQLiteRegistry(dbPath string, logger *slog.Logger) (*SQLiteRegistry, err
 	}
 
 	r := &SQLiteRegistry{
-		db:     db,
-		logger: logger,
+		db:       db,
+		logger:   logger,
+		handlers: make(map[int]EventHandler),
 	}
 
 	if err := r.migrate(); err != nil {
@@ -343,14 +345,23 @@ func (r *SQLiteRegistry) ListAgents(ctx context.Context, filter models.AgentFilt
 		}
 
 		if descJSON.Valid {
-			json.Unmarshal([]byte(descJSON.String), &agent.AgentDescription)
+			if err := json.Unmarshal([]byte(descJSON.String), &agent.AgentDescription); err != nil {
+				r.logger.Warn("failed to unmarshal agent description in list",
+					"instance_uid", agent.InstanceUID, "error", err)
+			}
 		}
 		if labelsJSON.Valid {
-			json.Unmarshal([]byte(labelsJSON.String), &agent.Labels)
+			if err := json.Unmarshal([]byte(labelsJSON.String), &agent.Labels); err != nil {
+				r.logger.Warn("failed to unmarshal labels in list",
+					"instance_uid", agent.InstanceUID, "error", err)
+			}
 		}
 		if remoteConfigStatusJSON.Valid && remoteConfigStatusJSON.String != "" {
 			agent.RemoteConfigStatus = &models.RemoteConfigStatus{}
-			json.Unmarshal([]byte(remoteConfigStatusJSON.String), agent.RemoteConfigStatus)
+			if err := json.Unmarshal([]byte(remoteConfigStatusJSON.String), agent.RemoteConfigStatus); err != nil {
+				r.logger.Warn("failed to unmarshal remote config status in list",
+					"instance_uid", agent.InstanceUID, "error", err)
+			}
 		}
 		if lastSeen.Valid {
 			agent.LastSeen = lastSeen.Time
@@ -498,27 +509,27 @@ func (r *SQLiteRegistry) Subscribe(handler EventHandler) func() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.handlers = append(r.handlers, handler)
-	index := len(r.handlers) - 1
+	id := r.nextHandlerID
+	r.nextHandlerID++
+	r.handlers[id] = handler
 
 	return func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		// Set to nil to avoid slice reordering issues
-		r.handlers[index] = nil
+		delete(r.handlers, id)
 	}
 }
 
 func (r *SQLiteRegistry) emit(event Event) {
 	r.mu.RLock()
-	handlers := make([]EventHandler, len(r.handlers))
-	copy(handlers, r.handlers)
+	handlers := make([]EventHandler, 0, len(r.handlers))
+	for _, h := range r.handlers {
+		handlers = append(handlers, h)
+	}
 	r.mu.RUnlock()
 
 	for _, h := range handlers {
-		if h != nil {
-			go h(event)
-		}
+		go h(event)
 	}
 }
 
