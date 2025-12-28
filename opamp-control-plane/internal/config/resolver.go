@@ -7,12 +7,31 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/bcrisp4/opamp-control-plane/pkg/models"
 )
+
+// validatePathComponent checks that a path component doesn't contain
+// path traversal sequences or absolute path elements.
+func validatePathComponent(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty path component")
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("path traversal not allowed: %s", name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("path separators not allowed: %s", name)
+	}
+	if filepath.IsAbs(name) {
+		return fmt.Errorf("absolute paths not allowed: %s", name)
+	}
+	return nil
+}
 
 // Resolver resolves effective configurations for agents.
 type Resolver struct {
@@ -142,6 +161,11 @@ func (r *Resolver) Resolve(agent *models.Agent) (*models.EffectiveConfig, error)
 		}, nil
 	}
 
+	// Validate config path to prevent path traversal
+	if err := validatePathComponent(selector.Config); err != nil {
+		return nil, fmt.Errorf("invalid config path: %w", err)
+	}
+
 	// Get the agent-specific config
 	agentConfig, ok := r.agentConfigs[selector.Config]
 	if !ok {
@@ -156,6 +180,10 @@ func (r *Resolver) Resolve(agent *models.Agent) (*models.EffectiveConfig, error)
 
 	// Add overlay if specified
 	if selector.Overlay != "" {
+		// Validate overlay name to prevent path traversal
+		if err := validatePathComponent(selector.Overlay); err != nil {
+			return nil, fmt.Errorf("invalid overlay name: %w", err)
+		}
 		if overlay, ok := r.overlays[selector.Overlay]; ok {
 			configs = append(configs, overlay)
 		} else {
@@ -208,6 +236,11 @@ func (r *Resolver) GetConfigForSelector(selectorName string) (*models.EffectiveC
 		return nil, fmt.Errorf("selector not found: %s", selectorName)
 	}
 
+	// Validate config path to prevent path traversal
+	if err := validatePathComponent(selector.Config); err != nil {
+		return nil, fmt.Errorf("invalid config path: %w", err)
+	}
+
 	// Get the agent-specific config
 	agentConfig, ok := r.agentConfigs[selector.Config]
 	if !ok {
@@ -220,6 +253,10 @@ func (r *Resolver) GetConfigForSelector(selectorName string) (*models.EffectiveC
 	}
 
 	if selector.Overlay != "" {
+		// Validate overlay name to prevent path traversal
+		if err := validatePathComponent(selector.Overlay); err != nil {
+			return nil, fmt.Errorf("invalid overlay name: %w", err)
+		}
 		if overlay, ok := r.overlays[selector.Overlay]; ok {
 			configs = append(configs, overlay)
 		}

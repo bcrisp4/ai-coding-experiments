@@ -187,7 +187,11 @@ func (h *Handlers) GetHealth(w http.ResponseWriter, r *http.Request) {
 	// Check git sync
 	if h.GitSyncer != nil {
 		if commit := h.GitSyncer.GetLastCommit(); commit != "" {
-			checks["git_sync"] = "healthy (commit: " + commit[:8] + ")"
+			shortCommit := commit
+			if len(commit) > 8 {
+				shortCommit = commit[:8]
+			}
+			checks["git_sync"] = "healthy (commit: " + shortCommit + ")"
 		} else {
 			checks["git_sync"] = "pending"
 		}
