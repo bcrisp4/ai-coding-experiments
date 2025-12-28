@@ -148,20 +148,20 @@ func (h *Handlers) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reload configs
-	if err := h.ConfigResolver.LoadConfigs(); err != nil {
-		h.Logger.Error("failed to reload configs", "error", err)
+	if loadErr := h.ConfigResolver.LoadConfigs(); loadErr != nil {
+		h.Logger.Error("failed to reload configs", "error", loadErr)
 		writeJSON(w, http.StatusInternalServerError, models.SyncResult{
 			Status: "failed",
 			Commit: commit,
-			Error:  err.Error(),
+			Error:  loadErr.Error(),
 		})
 		return
 	}
 
 	// Count agents that would be updated
-	agents, err := h.Registry.ListAgents(ctx, models.AgentFilter{})
-	if err != nil {
-		h.Logger.Warn("failed to count agents for sync response", "error", err)
+	agents, listErr := h.Registry.ListAgents(ctx, models.AgentFilter{})
+	if listErr != nil {
+		h.Logger.Warn("failed to count agents for sync response", "error", listErr)
 	}
 
 	writeJSON(w, http.StatusOK, models.SyncResult{

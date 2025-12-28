@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bcrisp4/opamp-control-plane/pkg/models"
 	_ "modernc.org/sqlite"
+
+	"github.com/bcrisp4/opamp-control-plane/pkg/models"
 )
 
 // SQLiteRegistry implements Registry using SQLite.

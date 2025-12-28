@@ -214,10 +214,7 @@ func (s *Server) handleConnectionClose(conn types.Connection) {
 		if value == conn {
 			var ok bool
 			instanceUID, ok = key.(string)
-			if !ok {
-				return true
-			}
-			return false
+			return !ok
 		}
 		return true
 	})
