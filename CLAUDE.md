@@ -15,9 +15,11 @@ ai-coding-experiments/
 ├── CLAUDE.md
 ├── README.md
 ├── project-a/
+│   ├── CLAUDE.md
 │   ├── README.md
 │   └── ...
 ├── project-b/
+│   ├── CLAUDE.md
 │   ├── README.md
 │   └── ...
 └── ...
@@ -28,11 +30,15 @@ ai-coding-experiments/
 ### Creating New Projects
 
 1. Create a new directory at the repository root with a descriptive name
-2. Include a `README.md` in the project directory explaining:
+2. Include a `CLAUDE.md` in the project directory with project-specific guidance:
+   - Build and test commands
+   - Project-specific conventions or patterns
+   - Any context future agents need to work effectively on the project
+3. Include a `README.md` in the project directory explaining:
    - What the project is
    - How to run/use it
    - Any dependencies or setup required
-3. Update the top-level `README.md` to list the new project with a brief description
+4. Update the top-level `README.md` to list the new project with a brief description
 
 ### Working Autonomously
 
