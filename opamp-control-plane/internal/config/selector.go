@@ -22,14 +22,16 @@ func NewSelectorMatcher(selectors []models.ConfigSelector) *SelectorMatcher {
 
 // Match finds the first matching selector for an agent's labels.
 // Returns nil if no selector matches.
+// The returned selector is a copy, safe to use after the lock is released.
 func (m *SelectorMatcher) Match(labels map[string]string) *models.ConfigSelector {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	for i := range m.selectors {
-		selector := &m.selectors[i]
-		if m.matchesSelector(labels, selector) {
-			return selector
+		if m.matchesSelector(labels, &m.selectors[i]) {
+			// Return a copy to avoid data race with UpdateSelectors
+			result := m.selectors[i]
+			return &result
 		}
 	}
 	return nil

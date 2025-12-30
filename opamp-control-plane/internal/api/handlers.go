@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/bcrisp4/opamp-control-plane/internal/config"
@@ -273,7 +274,7 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 func isHealthyStatus(s string) bool {
-	return len(s) > 7 && s[:7] == "healthy"
+	return s == "healthy" || s == "pending" || strings.HasPrefix(s, "healthy ")
 }
 
 // validateInstanceUID validates the instance UID format.

@@ -510,20 +510,76 @@ func (r *SQLiteRegistry) RecordHeartbeat(ctx context.Context, instanceUID string
 func (r *SQLiteRegistry) GetStaleAgents(ctx context.Context, threshold time.Duration) ([]*models.Agent, error) {
 	cutoff := time.Now().Add(-threshold)
 
-	filter := models.AgentFilter{}
-	agents, err := r.ListAgents(ctx, filter)
+	query := `
+	SELECT instance_uid, agent_description, labels, status, last_seen,
+		effective_config_name, effective_config_hash, config_status,
+		remote_config_status, capabilities, created_at, updated_at
+	FROM agents
+	WHERE status = ? AND last_seen < ?
+	ORDER BY last_seen ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, models.AgentStatusConnected, cutoff)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query stale agents: %w", err)
 	}
+	defer rows.Close()
 
-	var stale []*models.Agent
-	for _, agent := range agents {
-		if agent.LastSeen.Before(cutoff) && agent.Status == models.AgentStatusConnected {
-			stale = append(stale, agent)
+	var agents []*models.Agent
+	for rows.Next() {
+		var agent models.Agent
+		var descJSON, labelsJSON, remoteConfigStatusJSON sql.NullString
+		var lastSeen sql.NullTime
+		var effectiveConfigName, effectiveConfigHash sql.NullString
+
+		err := rows.Scan(
+			&agent.InstanceUID,
+			&descJSON,
+			&labelsJSON,
+			&agent.Status,
+			&lastSeen,
+			&effectiveConfigName,
+			&effectiveConfigHash,
+			&agent.ConfigStatus,
+			&remoteConfigStatusJSON,
+			&agent.Capabilities,
+			&agent.CreatedAt,
+			&agent.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan stale agent: %w", err)
 		}
+
+		if descJSON.Valid {
+			if err := json.Unmarshal([]byte(descJSON.String), &agent.AgentDescription); err != nil {
+				r.logger.Warn("failed to unmarshal agent description", "instance_uid", agent.InstanceUID, "error", err)
+			}
+		}
+		if labelsJSON.Valid {
+			if err := json.Unmarshal([]byte(labelsJSON.String), &agent.Labels); err != nil {
+				r.logger.Warn("failed to unmarshal labels", "instance_uid", agent.InstanceUID, "error", err)
+			}
+		}
+		if remoteConfigStatusJSON.Valid && remoteConfigStatusJSON.String != "" {
+			agent.RemoteConfigStatus = &models.RemoteConfigStatus{}
+			if err := json.Unmarshal([]byte(remoteConfigStatusJSON.String), agent.RemoteConfigStatus); err != nil {
+				r.logger.Warn("failed to unmarshal remote config status", "instance_uid", agent.InstanceUID, "error", err)
+			}
+		}
+		if lastSeen.Valid {
+			agent.LastSeen = lastSeen.Time
+		}
+		if effectiveConfigName.Valid {
+			agent.EffectiveConfigName = effectiveConfigName.String
+		}
+		if effectiveConfigHash.Valid {
+			agent.EffectiveConfigHash = effectiveConfigHash.String
+		}
+
+		agents = append(agents, &agent)
 	}
 
-	return stale, nil
+	return agents, rows.Err()
 }
 
 // Subscribe registers an event handler and returns an unsubscribe function.
@@ -542,6 +598,9 @@ func (r *SQLiteRegistry) Subscribe(handler EventHandler) func() {
 	}
 }
 
+// eventHandlerTimeout is the maximum time allowed for an event handler to complete.
+const eventHandlerTimeout = 5 * time.Second
+
 func (r *SQLiteRegistry) emit(event Event) {
 	r.mu.RLock()
 	handlers := make([]EventHandler, 0, len(r.handlers))
@@ -551,7 +610,25 @@ func (r *SQLiteRegistry) emit(event Event) {
 	r.mu.RUnlock()
 
 	for _, h := range handlers {
-		go h(event)
+		go func(handler EventHandler) {
+			ctx, cancel := context.WithTimeout(context.Background(), eventHandlerTimeout)
+			defer cancel()
+
+			done := make(chan struct{})
+			go func() {
+				handler(event)
+				close(done)
+			}()
+
+			select {
+			case <-done:
+				// Handler completed successfully
+			case <-ctx.Done():
+				r.logger.Warn("event handler timed out",
+					"event_type", event.Type,
+					"timeout", eventHandlerTimeout)
+			}
+		}(h)
 	}
 }
 
