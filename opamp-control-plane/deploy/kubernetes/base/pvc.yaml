@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opamp-control-plane-data
+  namespace: opamp-system
+  labels:
+    app.kubernetes.io/name: opamp-control-plane
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment and set your storage class if needed
+  # storageClassName: standard

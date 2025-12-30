@@ -1,0 +1,41 @@
+selectors:
+  - name: "kubernetes-daemonset"
+    match:
+      labels:
+        deployment: kubernetes
+        role: daemonset
+    config: kubernetes-daemonset/collector.yaml
+    overlay: production
+
+  - name: "kubernetes-daemonset-staging"
+    match:
+      labels:
+        deployment: kubernetes
+        role: daemonset
+        environment: staging
+    config: kubernetes-daemonset/collector.yaml
+    overlay: staging
+
+  - name: "vm-gateway"
+    match:
+      labels:
+        deployment: vm
+        role: gateway
+    config: vm-gateway/collector.yaml
+    overlay: production
+
+  - name: "vm-gateway-staging"
+    match:
+      labels:
+        deployment: vm
+        role: gateway
+        environment: staging
+    config: vm-gateway/collector.yaml
+    overlay: staging
+
+  - name: "docker-demo"
+    match:
+      labels:
+        deployment: docker
+        role: gateway
+    config: vm-gateway/collector.yaml

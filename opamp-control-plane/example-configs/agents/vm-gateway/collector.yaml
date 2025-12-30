@@ -1,0 +1,56 @@
+# VM Gateway specific config - receives from other collectors
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'vm-metrics'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['localhost:9100']  # node_exporter
+
+processors:
+  filter:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name == "go_gc_duration_seconds"'
+
+  transform:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["environment"], "vm")
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100
+    expected_new_traces_per_sec: 10
+    policies:
+      - name: errors
+        type: status_code
+        status_code: {status_codes: [ERROR]}
+      - name: slow-traces
+        type: latency
+        latency: {threshold_ms: 1000}
+      - name: probabilistic
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, filter, transform, batch]
+      exporters: [debug]

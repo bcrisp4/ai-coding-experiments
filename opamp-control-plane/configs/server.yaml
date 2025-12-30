@@ -1,0 +1,33 @@
+server:
+  http_addr: ":8080"
+  opamp_addr: ":4320"
+
+storage:
+  type: "sqlite"
+  sqlite:
+    path: "./data/opamp.db"
+
+git:
+  # Remote repository URL (leave empty for local-only mode)
+  repo_url: "${GIT_REPO_URL}"
+  branch: "main"
+  poll_interval: "60s"
+  local_path: "./data/configs"
+
+  # Authentication (choose one method)
+  # For HTTPS with token:
+  username: "${GIT_USERNAME}"
+  password: "${GIT_PASSWORD}"
+  # For SSH:
+  # ssh_key_path: "/path/to/id_rsa"
+
+  # Webhook secret for GitHub/GitLab push events
+  webhook_secret: "${GIT_WEBHOOK_SECRET}"
+
+validation:
+  enabled: true
+  strict_otel_schema: false
+
+logging:
+  level: "info"
+  format: "json"

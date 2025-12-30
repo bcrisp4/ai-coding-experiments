@@ -1,0 +1,122 @@
+name: OpAMP Control Plane CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'opamp-control-plane/**.go'
+      - 'opamp-control-plane/go.mod'
+      - 'opamp-control-plane/go.sum'
+      - '.github/workflows/opamp-ci.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'opamp-control-plane/**.go'
+      - 'opamp-control-plane/go.mod'
+      - 'opamp-control-plane/go.sum'
+      - '.github/workflows/opamp-ci.yaml'
+
+defaults:
+  run:
+    working-directory: opamp-control-plane
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+          cache-dependency-path: opamp-control-plane/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: opamp-control-plane/coverage.out
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+          cache-dependency-path: opamp-control-plane/go.sum
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: opamp-control-plane
+          args: --timeout=5m
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+          cache-dependency-path: opamp-control-plane/go.sum
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          BINARY_NAME="opamp-control-plane"
+          if [ "$GOOS" = "windows" ]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
+          go build -ldflags="-w -s" -o "dist/${BINARY_NAME}-${GOOS}-${GOARCH}" ./cmd/server
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opamp-control-plane-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: opamp-control-plane/dist/
+          retention-days: 7

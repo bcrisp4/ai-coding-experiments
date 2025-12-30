@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Go modules for opamp-control-plane
+  - package-ecosystem: "gomod"
+    directory: "/opamp-control-plane"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps(opamp)"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+
+  # Docker for opamp-control-plane
+  - package-ecosystem: "docker"
+    directory: "/opamp-control-plane"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "docker(opamp)"

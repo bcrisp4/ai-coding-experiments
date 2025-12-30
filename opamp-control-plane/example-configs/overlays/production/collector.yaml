@@ -1,0 +1,26 @@
+# Production overlay - higher limits and sampling
+processors:
+  batch:
+    timeout: 2s
+    send_batch_size: 2048
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  probabilistic_sampler:
+    sampling_percentage: 10
+
+exporters:
+  otlp:
+    endpoint: "${OTLP_ENDPOINT:prod-otel-backend:4317}"
+    tls:
+      insecure: false
+      cert_file: /etc/otel/certs/client.crt
+      key_file: /etc/otel/certs/client.key
+
+service:
+  pipelines:
+    traces:
+      processors: [memory_limiter, probabilistic_sampler, batch]

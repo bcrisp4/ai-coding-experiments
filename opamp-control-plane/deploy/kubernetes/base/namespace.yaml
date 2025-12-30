@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opamp-system
+  labels:
+    app.kubernetes.io/name: opamp-control-plane
+    app.kubernetes.io/component: control-plane

@@ -1,0 +1,14 @@
+# Staging overlay - debug mode
+processors:
+  batch:
+    timeout: 500ms
+    send_batch_size: 512
+
+exporters:
+  debug:
+    verbosity: detailed
+
+  otlp:
+    endpoint: "${OTLP_ENDPOINT:staging-otel-backend:4317}"
+    tls:
+      insecure: true
