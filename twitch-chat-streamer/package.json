@@ -1,0 +1,21 @@
+{
+  "name": "twitch-chat-streamer",
+  "version": "1.0.0",
+  "description": "Stream Twitch.tv chat messages in realtime",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "twitch",
+    "chat",
+    "streaming",
+    "irc"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
