@@ -70,13 +70,86 @@ Exit codes also matter:
 - Exit `0` — Hook succeeded, use the JSON output
 - Exit `2` — Block the action
 
+### What the Hook Actually Receives
+
+Every hook gets a JSON payload on stdin. The full schema:
+
+```json
+{
+  "session_id": "eb5b0174-0555-4601-804e-672d68069c89",
+  "transcript_path": "/home/user/.claude/projects/-home-user-myproject/eb5b0174.jsonl",
+  "cwd": "/home/user/myproject",
+  "permission_mode": "default",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm install some-package",
+    "description": "Install dependencies"
+  },
+  "tool_use_id": "toolu_01ABC123..."
+}
+```
+
+| Field | What It Tells You |
+|---|---|
+| `tool_name` | The tool Claude wants to use (Bash, Edit, Write, mcp__server__tool, etc.) |
+| `tool_input` | Exact parameters — the command, file path, content, etc. |
+| `session_id` | Unique session identifier |
+| `transcript_path` | **The critical field** — full path to the session's JSONL transcript file |
+| `cwd` | Current working directory |
+| `permission_mode` | Which permission mode is active (default, plan, acceptEdits, etc.) |
+
+The `tool_input` schema varies by tool:
+- **Bash**: `command`, `description`, `timeout`
+- **Edit**: `file_path`, `old_string`, `new_string`
+- **Write**: `file_path`, `content`
+- **Read**: `file_path`, `offset`, `limit`
+- **MCP tools**: Follows `mcp__<server>__<tool>` naming with tool-specific input
+
+### The Session Transcript — Your Window Into Context
+
+The `transcript_path` field is the key to solving the context problem. It points to a JSONL file that contains the **entire conversation history** for this session:
+
+```
+~/.claude/projects/<encoded-project-path>/<session-uuid>.jsonl
+```
+
+Each line is a JSON object:
+
+```json
+{
+  "type": "assistant",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {"type": "text", "text": "I'll fix the validation bug by editing the check function."},
+      {"type": "tool_use", "id": "toolu_01ABC...", "name": "Edit", "input": {"file_path": "..."}}
+    ]
+  },
+  "uuid": "a1234567-...",
+  "timestamp": "2026-01-28T10:30:55.015Z",
+  "gitBranch": "feature/validation-fix"
+}
+```
+
+Entry types include `"user"` (what you asked), `"assistant"` (Claude's responses including tool calls), and `"summary"` (compacted context). By parsing this file, your hook script can extract:
+
+- **Claude's stated reasoning** — The text block in the last assistant message, right before the tool_use block, typically explains what Claude intends to do and why
+- **Your original prompt** — What you asked Claude to work on
+- **Recent conversation history** — The last N back-and-forth exchanges
+- **Prior tool uses and their results** — What Claude has already done in this session
+- **Git branch and project context** — From entry metadata
+
+**What's NOT available**: Claude's internal chain-of-thought / extended thinking. Only its visible text output. But in practice, Claude almost always explains its reasoning before calling a tool, so the last assistant text block is a good proxy.
+
 ### The Key Insight
 
 The `PermissionRequest` hook fires **when Claude Code is already waiting for a yes/no from the user**. If your hook script can:
 
-1. Send a notification to your phone
-2. Wait for your response
-3. Return `allow` or `deny`
+1. Parse the transcript for context about what Claude is doing and why
+2. Send a rich notification to your phone
+3. Wait for your response
+4. Return `allow` or `deny`
 
 ...then Claude Code will act on your remote decision as if you'd typed it at the terminal.
 
@@ -360,7 +433,401 @@ esac
 
 ---
 
-## Part 4: Open Questions and Challenges
+## Part 4: Rich Context — Making Notifications Useful
+
+The raw hook payload gives you `tool_name: "Bash"` and `tool_input: {"command": "npm install some-package"}`. That's not enough to make an informed decision from your phone. You need to know *why* Claude wants to do this, *what it's been working on*, and *what happens if you say no*.
+
+### What Context to Include
+
+There are three tiers of information, matching how much screen space and attention they require:
+
+#### Tier 1: The Notification Banner (what you see at a glance)
+
+This is the push notification as it appears on your lock screen. ~100 characters max. Must answer: "what does Claude want to do?"
+
+```
+Title:  Claude Code — Bash
+Body:   npm install lodash  ·  my-project (main)
+```
+
+Format: `Tool name` in the title, `command/action` + `project (branch)` in the body. For different tools:
+
+| Tool | Banner Body Example |
+|---|---|
+| Bash | `rm -rf dist/ && npm run build  ·  my-app (feature/auth)` |
+| Edit | `Edit src/auth/login.ts (lines 45-52)  ·  my-app (feature/auth)` |
+| Write | `Create src/utils/helpers.ts (new file)  ·  my-app (feature/auth)` |
+| MCP tool | `mcp: github/create_pull_request  ·  my-app (feature/auth)` |
+
+#### Tier 2: The Expanded Notification (what you see when you pull down or tap)
+
+This is the detail view. Room for ~500-1000 characters. Must answer: "why does Claude want to do this?"
+
+```
+Claude Code — Bash
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Command:  npm install lodash
+Project:  my-project (main)
+Session:  "Add utility functions for data processing"
+
+Why: "I need to install lodash to use its deep-clone
+functionality for the data transformation pipeline
+I'm building."
+
+Recent: Read src/transform.ts → Edit src/transform.ts
+        → Read package.json → [this request]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       [Approve]  [Reject]  [More Info]
+```
+
+The "Why" field comes from parsing the transcript — specifically, the last assistant text block before the tool_use.
+
+The "Recent" field shows the last 3-4 tool calls to give a sense of the current activity flow.
+
+The "Session" description comes from the first user message (your original prompt).
+
+#### Tier 3: Full Details (what you see when you tap "More Info")
+
+This is a separate message or web page with the complete picture:
+
+- Full command/input (not truncated)
+- Claude's complete explanation (entire last assistant text)
+- Last 10+ conversation exchanges
+- The original task/prompt
+- List of files modified so far in the session
+- How long the session has been running
+- Token usage / how deep into context
+
+### How to Extract Each Piece
+
+Here's a concrete reference for extracting each context element from the hook payload and transcript:
+
+```python
+#!/usr/bin/env python3
+"""context_extractor.py — Extract rich context from a Claude Code hook payload."""
+import json
+import sys
+
+# --- Read hook payload from stdin ---
+payload = json.load(sys.stdin)
+tool_name = payload.get("tool_name", "unknown")
+tool_input = payload.get("tool_input", {})
+transcript_path = payload.get("transcript_path", "")
+cwd = payload.get("cwd", "")
+session_id = payload.get("session_id", "")
+
+# --- Parse the transcript ---
+entries = []
+with open(transcript_path, "r") as f:
+    for line in f:
+        line = line.strip()
+        if line:
+            entries.append(json.loads(line))
+
+# --- Extract the original user prompt (first user message) ---
+original_prompt = ""
+for entry in entries:
+    if entry.get("type") == "user":
+        msg = entry.get("message", {})
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            original_prompt = content
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    original_prompt = block["text"]
+        break
+
+# --- Extract Claude's stated reasoning (last assistant text before tool_use) ---
+reasoning = ""
+for entry in reversed(entries):
+    if entry.get("type") == "assistant":
+        msg = entry.get("message", {})
+        content = msg.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    reasoning = block["text"]
+                    break
+        if reasoning:
+            break
+
+# --- Extract recent tool calls (last N tool_use blocks) ---
+recent_tools = []
+for entry in reversed(entries):
+    if entry.get("type") == "assistant":
+        msg = entry.get("message", {})
+        content = msg.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    recent_tools.append(block["name"])
+    if len(recent_tools) >= 5:
+        break
+recent_tools.reverse()
+
+# --- Extract git branch ---
+git_branch = ""
+for entry in reversed(entries):
+    if entry.get("gitBranch"):
+        git_branch = entry["gitBranch"]
+        break
+
+# --- Extract project name from cwd ---
+project_name = cwd.split("/")[-1] if cwd else "unknown"
+
+# --- Format the tool action (human-readable summary) ---
+if tool_name == "Bash":
+    action = tool_input.get("command", str(tool_input))
+elif tool_name == "Edit":
+    fp = tool_input.get("file_path", "?")
+    action = f"Edit {fp}"
+elif tool_name == "Write":
+    fp = tool_input.get("file_path", "?")
+    action = f"Create/overwrite {fp}"
+elif tool_name == "Read":
+    fp = tool_input.get("file_path", "?")
+    action = f"Read {fp}"
+else:
+    action = json.dumps(tool_input)[:300]
+
+# --- Build the context object ---
+context = {
+    "tool_name": tool_name,
+    "action": action[:500],
+    "project": f"{project_name} ({git_branch})" if git_branch else project_name,
+    "session_task": original_prompt[:200],
+    "reasoning": reasoning[:500],
+    "recent_tools": " → ".join(recent_tools[-4:]),
+    "full_input": json.dumps(tool_input),
+    "full_reasoning": reasoning,
+    "session_id": session_id,
+}
+
+json.dump(context, sys.stdout)
+```
+
+### Notification Format by Platform
+
+#### ntfy.sh
+
+ntfy supports a title (up to ~256 chars) and message body (no hard limit). Buttons are action objects.
+
+```bash
+# Tier 1 + Tier 2 in a single notification
+curl -H "Content-Type: application/json" -d "{
+  \"topic\": \"${NTFY_TOPIC}\",
+  \"title\": \"Claude: ${TOOL_NAME} — ${PROJECT}\",
+  \"message\": \"${ACTION}\n\nWhy: ${REASONING}\n\nRecent: ${RECENT_TOOLS}\nTask: ${SESSION_TASK}\",
+  \"priority\": 4,
+  \"actions\": [
+    {\"action\":\"http\",\"label\":\"Approve\", ...},
+    {\"action\":\"http\",\"label\":\"Reject\", ...},
+    {\"action\":\"http\",\"label\":\"More Info\", ...}
+  ]
+}" https://ntfy.sh
+```
+
+The "More Info" button POSTs `"moreinfo"` to the response topic. The hook script, on receiving this, sends a *second* notification with tier 3 detail.
+
+#### Telegram
+
+Telegram supports markdown formatting and up to 4096 characters per message. Inline keyboard buttons.
+
+```
+🔐 Permission Request
+
+Tool: `Bash`
+Command: `npm install lodash`
+Project: my-project (main)
+
+Why: "I need to install lodash to use its deep-clone
+functionality for the data transformation pipeline."
+
+Recent: Read → Edit → Read → [this]
+Task: "Add utility functions for data processing"
+
+[✅ Approve]  [❌ Reject]  [ℹ️ More Info]
+```
+
+On "More Info", the bot sends a follow-up message in the same chat with the full details. This feels very natural in Telegram — it's just a conversation thread.
+
+---
+
+## Part 5: The "Ask for More Context" Flow
+
+A binary approve/reject isn't enough. Sometimes you look at the notification and think: "I don't understand why it needs to do this. Explain yourself." There are three approaches to handling this, each with different tradeoffs.
+
+### Approach 1: Proactive Context (Pre-Generate Everything)
+
+Don't wait for the user to ask. Parse the transcript when the hook fires and include all context in the first notification. Make "More Info" just show the full untruncated version of what you've already parsed.
+
+**Flow:**
+```
+Hook fires
+  → Parse transcript for reasoning, recent activity, original prompt
+  → Send rich notification with context summary
+  → User reads context, taps Approve or Reject
+```
+
+**Pros:**
+- Single round-trip. Fastest possible response time.
+- No extra infrastructure needed.
+- Works with any notification service.
+
+**Cons:**
+- Can't ask Claude to clarify or elaborate — you only get what's already in the transcript.
+- The transcript text might not explain the specific reasoning for *this* tool call clearly.
+- Fixed context — what if you want to ask "what happens if I reject this?"
+
+### Approach 2: Deny-and-Explain Loop (Use Claude Itself)
+
+When the user taps "More Info", deny the permission with a message that asks Claude to explain itself. Claude receives the denial, explains its reasoning, and retries the tool call. The next permission request notification now includes Claude's explanation.
+
+**Flow:**
+```
+Hook fires
+  → Send notification: "Bash: npm install lodash"
+  → User taps "More Info"
+  → Hook returns: {"behavior": "deny", "message": "Before I approve this, explain
+     why you need to install lodash specifically. What functionality do you need
+     from it? Are there alternatives already in the project's dependencies?
+     Then try again."}
+  → Claude receives denial + message
+  → Claude explains: "I need lodash for deep cloning because the project uses
+     nested objects in the transform pipeline. I checked package.json and there's
+     no existing deep-clone utility. structuredClone() would work but isn't
+     available in the target Node version (14.x)."
+  → Claude retries: Bash(npm install lodash)
+  → Hook fires again
+  → Send NEW notification with Claude's explanation included
+     (it's now in the transcript, so the context extractor picks it up)
+  → User reads explanation, taps Approve
+```
+
+**Pros:**
+- Gets *Claude's own explanation* in Claude's own words. This is the best possible context.
+- Claude can adapt its explanation to your question — you can ask specific things.
+- No extra API calls, no external services — just the normal conversation flow.
+- The denial message is freeform — you can ask anything: "what will this do?", "are there alternatives?", "what happens if I say no?"
+
+**Cons:**
+- Multi-round-trip. User waits for Claude to respond, gets a second notification.
+- Burns extra tokens (Claude has to explain and retry).
+- The "deny message" needs to be clear enough that Claude understands it should explain and retry, not give up.
+- If Claude decides not to retry, the flow breaks. (In practice, Claude almost always retries when given a clear instruction to explain and try again.)
+
+**This is the most interesting approach** because it mirrors how a human would interact at the terminal: "Wait, why do you need that?" → Claude explains → "OK, go ahead."
+
+### Approach 3: Sidecar LLM Summarizer
+
+When the user taps "More Info", the hook script reads the transcript and sends it to a fast/cheap LLM (like Haiku) with a prompt: "Summarize what Claude is doing and why it needs to run this command. Be concise."
+
+**Flow:**
+```
+Hook fires
+  → Send notification: "Bash: npm install lodash"
+  → User taps "More Info"
+  → Hook reads transcript, sends last ~20 entries to Haiku
+  → Haiku returns: "Claude is building a data transformation pipeline.
+     It needs lodash for deep cloning nested objects. The project doesn't
+     have an existing clone utility and targets Node 14 which lacks
+     structuredClone()."
+  → Send second notification with Haiku's summary
+  → User taps Approve or Reject
+```
+
+**Pros:**
+- Gets a clear, tailored summary focused specifically on the pending permission.
+- Faster than the deny-and-explain loop (doesn't require Claude to re-process).
+- Can ask the summarizer specific questions.
+
+**Cons:**
+- Extra API cost (small — Haiku is cheap, and transcripts are small).
+- Extra complexity (need an API key available to the hook script).
+- The summarizer might miss context that Claude's own explanation would include.
+- Adds latency for the "More Info" step.
+
+### Recommended: Combine Approaches 1 and 2
+
+The best design layers these:
+
+1. **Default**: Use Approach 1. Parse the transcript proactively, include Claude's last explanation and recent activity in every notification. Most of the time, this is enough context to decide.
+
+2. **Fallback**: When the user taps "More Info", use Approach 2. Deny with a freeform message asking Claude to explain. The denial message could be:
+   - A pre-written generic prompt: "Please explain why you need this permission and try again."
+   - Or, in Telegram, the user can *type* their question — "what will this command change?" — and that becomes the denial message.
+
+This gives you fast one-tap approval for obvious cases and a conversational back-and-forth for unclear ones.
+
+### Telegram Makes "More Info" Natural
+
+Telegram is particularly well-suited for Approach 2 because:
+
+- The user can type a reply in the chat instead of just tapping a button
+- The bot can relay that reply as the denial message to Claude
+- Claude's explanation appears as a new message in the same thread
+- The updated notification (with Approve/Reject buttons) is a new message below the explanation
+- The whole exchange reads like a natural conversation:
+
+```
+Bot:    🔐 Permission Request
+        Tool: Bash
+        Command: npm install lodash
+        [Approve] [Reject] [Ask]
+
+You:    Why do you need lodash? Can't you use structuredClone?
+
+Bot:    Claude says:
+        "structuredClone isn't available in Node 14 which is
+        the project's target runtime. I checked package.json
+        and there's no existing deep clone utility. lodash's
+        cloneDeep is the standard solution for this environment."
+
+        Tool: Bash
+        Command: npm install lodash
+        [Approve] [Reject] [Ask]
+
+You:    [taps Approve]
+
+Bot:    ✅ Approved at 3:47 PM
+```
+
+With ntfy, the "More Info" flow is less fluid — you'd get a second notification with the explanation and new approve/reject buttons, but there's no threaded conversation. It works, but isn't as elegant.
+
+### Implementation Detail: The Deny-and-Explain Script
+
+Here's how the hook script handles the "More Info" response:
+
+```bash
+# ... (after receiving "moreinfo" from the response topic) ...
+
+case "$DECISION" in
+  approved)
+    echo '{"behavior": "allow"}'
+    ;;
+  rejected)
+    echo '{"behavior": "deny", "message": "Rejected remotely"}'
+    ;;
+  moreinfo)
+    # Deny with a message that asks Claude to explain and retry
+    echo '{"behavior": "deny", "message": "I am reviewing this remotely and need more context before approving. Please explain in detail: (1) why you need to run this specific command, (2) what it will change, and (3) what happens if it is not run. Then try again."}'
+    ;;
+esac
+```
+
+When Claude receives this denial, it will:
+1. Read the message explaining what you want to know
+2. Provide a detailed explanation
+3. Attempt the same tool call again
+4. The hook fires again — this time, the transcript contains Claude's explanation
+5. Your new notification includes that explanation in the context
+
+The hook script should detect "retry after explanation" (e.g., by checking if the preceding transcript entry contains the explanation pattern) and potentially flag it differently: "Claude explained and is retrying. See explanation above."
+
+---
+
+## Part 6: Remaining Open Questions
 
 ### 1. Blocking vs. Non-Blocking Hooks
 
@@ -373,21 +840,11 @@ The blocking approach is simpler and more correct. Claude Code is designed for t
 
 ### 2. Context Richness
 
-A permission prompt on the terminal shows you exactly what Claude wants to do. A phone notification has limited space. Options:
+Covered in detail in **Part 4** above. In short: the `transcript_path` field in the hook payload gives access to the full session history. Parse it to extract Claude's reasoning, the original prompt, recent tool calls, and project context. Structure this into three tiers (banner → expanded → full detail) to match the notification UX.
 
-- **Short summary in the notification** — Tool name + first ~200 chars of input. Enough for most decisions.
-- **"More Info" button** — Tapping sends a follow-up notification with the full context, or opens a web page with the complete request details.
-- **Web dashboard** — A small web app that shows the full request, recent history, what Claude has been doing. Opens from the notification. Most effort but best experience.
+### 3. "Ask for More Context" Flow
 
-### 3. "More Info" Flow
-
-When the user taps "More Info":
-
-- Option A: Send a second notification with the full context, then wait for approve/reject on a third round
-- Option B: Open a web page with the full context + approve/reject buttons
-- Option C: In Telegram, send a follow-up message in the chat with expanded details and a new set of buttons
-
-Option C (with Telegram) is the most natural. Option B works with any notification service but requires running a small web server.
+Covered in detail in **Part 5** above. The recommended approach combines proactive context extraction (always include what's in the transcript) with a deny-and-explain loop (when the user wants more info, deny the permission with a message asking Claude to explain and retry). Telegram's threaded chat makes this particularly natural.
 
 ### 4. Security Considerations
 
@@ -418,7 +875,7 @@ Claude Code already has a `Notification` event type that fires when it wants to 
 
 ---
 
-## Part 5: Implementation Roadmap
+## Part 7: Implementation Roadmap
 
 If you wanted to build this for real, here's a phased approach:
 
@@ -459,7 +916,7 @@ If you wanted to build this for real, here's a phased approach:
 
 ---
 
-## Part 6: Quick-Start Recipe
+## Part 8: Quick-Start Recipe
 
 For the impatient — here's the minimum to get a working proof of concept:
 
