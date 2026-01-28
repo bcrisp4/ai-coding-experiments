@@ -13,3 +13,5 @@ This is a monolithic repo. Each project lives in its own subdirectory at the roo
 ## Projects
 
 - [twitch-chat-streamer](./twitch-chat-streamer) - Stream Twitch.tv chat messages in realtime via IRC WebSocket
+- [permission-notification-exploration](./permission-notification-exploration) - Exploring how to notify you on your phone when Claude Code needs permission, so you can approve/reject remotely
+- [permission-notification-research](./permission-notification-research) - Detailed comparison of 8 push notification services for approval workflows
