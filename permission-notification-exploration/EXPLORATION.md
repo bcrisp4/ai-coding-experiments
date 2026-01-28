@@ -170,14 +170,51 @@ See [notification-options/README.md](../permission-notification-research/README.
 
 ### Slack — Best for rich interaction (if you already use it)
 
-- Block Kit produces polished, professional-looking notifications with styled buttons
-- Native approve (green) / reject (red) / ask (neutral) buttons
-- **Threaded conversations** keep each permission request and its follow-up discussion neatly organized — better than a flat chat when multiple requests are pending
+Slack can be used at three different levels of complexity:
+
+**Level 1: Send-only (no daemon, no buttons)**
+- Hook script POSTs a rich Block Kit notification via `chat.postMessage` or an incoming webhook — just a `curl` call, same simplicity as ntfy
+- You see the full context on your phone: tool, command, reasoning, recent activity, project/branch
+- No interactive buttons — the notification is informational only
+- Pair with ntfy for the actual approve/reject decision (see Hybrid approach below)
+- **No daemon, no Socket Mode, no persistent process**
+
+**Level 2: Send + incoming webhook (no daemon, no buttons)**
+- Even simpler: create an incoming webhook URL in Slack, POST to it
+- No bot token or OAuth scopes needed
+- Same rich Block Kit formatting
+- Still informational only — no interactive response path back
+
+**Level 3: Full interactive (daemon required)**
+- Block Kit with native approve (green) / reject (red) / ask (neutral) buttons
+- **Threaded conversations** keep each permission request and its follow-up discussion neatly organized
 - Can edit the message after response to show "Approved by @you at 3:47 PM" and remove buttons
-- Works on a free Slack workspace (solo workspace is fine)
 - No public URL needed — uses Socket Mode (WebSocket)
-- **Key tradeoff**: Requires a **persistent daemon process** running alongside Claude Code to receive button clicks and DM messages. The hook script sends notifications, but a separate long-running process handles the response channel.
-- See [SLACK-DEEP-DIVE.md](./SLACK-DEEP-DIVE.md) for full details: setup, Block Kit formatting, Socket Mode, daemon architecture, and working code examples.
+- **Requires a persistent daemon process** to receive button clicks and DM messages
+- See [SLACK-DEEP-DIVE.md](./SLACK-DEEP-DIVE.md) for full details
+
+**The key distinction**: sending to Slack is trivial (one HTTP POST). Receiving *back from* Slack is what requires the daemon. This is why a hybrid approach is appealing.
+
+### Hybrid: Slack for context + ntfy for decisions
+
+The best-of-both-worlds approach, with no daemon needed:
+
+1. Hook fires → parse transcript for context
+2. Send a **rich Slack notification** via `chat.postMessage` (tool, command, reasoning, recent activity, project/branch) — this is your "situation report"
+3. Simultaneously send an **ntfy notification** with approve/reject/more-info action buttons — this is your "decision interface"
+4. Hook script subscribes to the ntfy response topic, blocks until you tap a button
+
+You get Slack's polished formatting for understanding what's going on, and ntfy's zero-infrastructure buttons for acting on it. No daemon, no WebSocket, no persistent process. Just two `curl` calls and a blocking subscribe.
+
+```
+Hook fires
+  → curl POST to Slack (rich context notification)
+  → curl POST to ntfy (approve/reject buttons)
+  → curl subscribe to ntfy response topic (blocks)
+  → User reads Slack notification for context
+  → User taps ntfy button to decide
+  → Hook returns allow/deny
+```
 
 ### Why Not the Others?
 
@@ -1048,10 +1085,12 @@ The building blocks already exist:
 
 | Phase | What | Notification Channel |
 |---|---|---|
-| **1. Proof of concept** | Minimal hook script, basic approve/reject | ntfy.sh |
-| **2. Rich context** | Transcript parsing, context extractor, "More Info" | ntfy.sh |
-| **3. Conversational approval** | Slack app + daemon, "Ask" flow with threads, message editing | Slack |
+| **1. Proof of concept** | Minimal hook script, basic approve/reject | ntfy.sh only |
+| **2. Rich context** | Transcript parsing, context extractor, "More Info" | Hybrid: Slack (context) + ntfy (buttons) |
+| **3. Conversational approval** | Slack daemon, "Ask" flow with threads, message editing | Slack full interactive (optional upgrade) |
 | **4. Polish** | Self-hosted ntfy, concurrent session support, audit log | Both |
+
+Note: Phase 2's hybrid approach gives you the best UX without running a daemon. You only need Phase 3 if you want the full conversational "ask for more context" flow inside Slack itself. The deny-and-explain loop (Part 5) works with the hybrid approach too — it just uses ntfy's buttons instead of Slack's.
 
 ### What we ruled out
 
