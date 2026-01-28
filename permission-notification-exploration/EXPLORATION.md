@@ -225,6 +225,236 @@ This works because the WebSocket is open before the user clicks, and the human r
 
 **Recommendation**: Start with the short-lived approach for proof of concept (it's simpler to set up — no daemon to manage). If you hit reliability issues, upgrade to the daemon. The hook script code barely changes — you're just swapping "open WebSocket and wait" for "poll local file and wait".
 
+### If Using a Daemon: Making It Invisible
+
+If the daemon approach is needed, it should feel zero-effort — no manual process management, no separate terminal window, no remembering to start something. Here are four approaches, from simplest to most robust:
+
+#### Approach 1: Lazy Start from the Hook Script (Simplest)
+
+The `PermissionRequest` hook script itself checks whether the daemon is running and starts it if not. The daemon is a background process that the hook script spawns on first use.
+
+```bash
+#!/usr/bin/env bash
+# permission-gate.sh
+
+DAEMON_PID_FILE="$HOME/.claude/slack-daemon.pid"
+DAEMON_SCRIPT="$HOME/.claude/slack-daemon.py"
+
+# Start daemon if not running
+if [ ! -f "$DAEMON_PID_FILE" ] || ! kill -0 "$(cat "$DAEMON_PID_FILE")" 2>/dev/null; then
+  nohup python3 "$DAEMON_SCRIPT" > "$HOME/.claude/slack-daemon.log" 2>&1 &
+  echo $! > "$DAEMON_PID_FILE"
+  sleep 1  # Give it a moment to connect
+fi
+
+# ... rest of hook script (send message, poll for response) ...
+```
+
+**Pros:**
+- Zero setup. The daemon starts automatically the first time Claude needs a permission.
+- No separate configuration or service management.
+- If the daemon dies, it restarts on the next permission request.
+
+**Cons:**
+- First permission request has ~1-2 second delay while daemon starts.
+- `nohup` processes can be orphaned if the daemon crashes without cleaning up the PID file. Need stale PID detection (the `kill -0` check handles this).
+- No clean shutdown — daemon runs until the machine reboots or you kill it manually.
+
+#### Approach 2: Claude Code's SessionStart Hook (Automatic)
+
+Use Claude Code's `SessionStart` hook to launch the daemon when a session begins, and the `SessionEnd` hook to stop it. The daemon's lifecycle matches the Claude Code session.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/start-slack-daemon.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/stop-slack-daemon.sh"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/permission-gate.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Where `start-slack-daemon.sh` is:
+
+```bash
+#!/usr/bin/env bash
+DAEMON_PID_FILE="$HOME/.claude/slack-daemon.pid"
+
+# Don't start a second instance
+if [ -f "$DAEMON_PID_FILE" ] && kill -0 "$(cat "$DAEMON_PID_FILE")" 2>/dev/null; then
+  exit 0
+fi
+
+nohup python3 "$HOME/.claude/slack-daemon.py" > "$HOME/.claude/slack-daemon.log" 2>&1 &
+echo $! > "$DAEMON_PID_FILE"
+```
+
+And `stop-slack-daemon.sh` is:
+
+```bash
+#!/usr/bin/env bash
+DAEMON_PID_FILE="$HOME/.claude/slack-daemon.pid"
+
+if [ -f "$DAEMON_PID_FILE" ]; then
+  kill "$(cat "$DAEMON_PID_FILE")" 2>/dev/null
+  rm -f "$DAEMON_PID_FILE"
+fi
+```
+
+**Pros:**
+- Daemon starts and stops with your Claude Code session — fully automatic.
+- No daemon running when you're not using Claude Code.
+- Clean lifecycle management.
+- Multiple concurrent sessions share the same daemon (the `kill -0` check avoids duplicates).
+
+**Cons:**
+- `SessionStart` fires on `startup`, `resume`, `clear`, and `compact` — need the idempotent start check to avoid spawning duplicates.
+- `SessionEnd` fires on `clear`, `logout`, and `prompt_input_exit`. If Claude Code crashes or is killed with SIGKILL, `SessionEnd` doesn't fire and the daemon is orphaned. Approach 1's stale PID check in the hook script acts as a safety net.
+- The daemon needs to start fast enough to not slow down session startup noticeably (~1 second for a Python process to start and connect is fine).
+
+**This is the recommended approach.** Combine it with Approach 1's stale PID check in the `PermissionRequest` hook as a belt-and-suspenders fallback.
+
+#### Approach 3: User Login Service (launchd / systemd)
+
+Register the daemon as an OS-level user service that starts on login and runs continuously.
+
+**macOS (launchd):**
+
+```xml
+<!-- ~/Library/LaunchAgents/com.claude.slack-daemon.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "...">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claude.slack-daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/you/.claude/slack-daemon.py</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/you/.claude/slack-daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/.claude/slack-daemon.log</string>
+</dict>
+</plist>
+```
+
+**Linux (systemd):**
+
+```ini
+# ~/.config/systemd/user/claude-slack-daemon.service
+[Unit]
+Description=Claude Code Slack Approval Daemon
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.claude/slack-daemon.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+**Pros:**
+- OS manages the lifecycle — auto-restart on crash, start on login, proper logging.
+- The most robust option. Set-and-forget.
+- `KeepAlive` (macOS) / `Restart=always` (Linux) means the daemon self-heals.
+
+**Cons:**
+- One-time setup required (`launchctl load` / `systemctl --user enable`).
+- Daemon runs all the time, even when you're not using Claude Code. Wastes a WebSocket connection and some memory (~20MB for a Python process).
+- OS-specific — needs separate configs for macOS and Linux.
+- Feels heavier than necessary for a developer tool.
+
+**Best for**: Power users who want guaranteed reliability, or if the daemon serves multiple tools beyond just Claude Code permissions.
+
+#### Approach 4: Installer Script (One-Time Setup)
+
+An installer script that sets everything up: creates the hook scripts, configures `settings.json`, and optionally registers the daemon as a login service. The user runs one command and never thinks about it again.
+
+```bash
+# Install the permission notification system
+curl -sSL https://raw.githubusercontent.com/.../install.sh | bash
+# or
+npx @your-org/claude-permission-notify setup
+```
+
+The installer:
+1. Copies the hook scripts to `~/.claude/`
+2. Copies the daemon script to `~/.claude/`
+3. Merges the hook configuration into `~/.claude/settings.json`
+4. Asks whether to use SessionStart hooks (Approach 2) or a login service (Approach 3)
+5. Optionally sets up the Slack app (guided flow with prompts for tokens)
+6. Runs a test notification to verify everything works
+
+**This is the best end-user experience** but the most effort to build. Save it for Phase 4 of the roadmap.
+
+#### Recommended: Approach 2 + Approach 1 Fallback
+
+Use the `SessionStart` hook to launch the daemon automatically when Claude Code starts. Add a stale PID check in the `PermissionRequest` hook as a fallback in case the daemon died or `SessionStart` didn't fire. This gives you:
+
+- **Automatic start** — daemon launches when Claude Code starts
+- **Automatic stop** — daemon stops when the session ends
+- **Self-healing** — if the daemon crashes, the next permission request restarts it
+- **No manual management** — the user configures hooks once and forgets about it
+- **No always-on process** — daemon only runs during Claude Code sessions
+
+```
+Claude Code starts
+  → SessionStart hook fires
+  → start-slack-daemon.sh checks PID, starts daemon if needed
+  → Daemon connects to Slack Socket Mode
+
+... Claude works ...
+
+Permission needed
+  → PermissionRequest hook fires
+  → permission-gate.sh checks daemon is alive (stale PID fallback)
+  → Sends Slack message, polls local DB for response
+
+... User approves ...
+
+Claude Code exits
+  → SessionEnd hook fires
+  → stop-slack-daemon.sh kills daemon, removes PID file
+```
+
 ### Hybrid: Slack for context + ntfy for decisions
 
 The best-of-both-worlds approach, with no daemon needed:
