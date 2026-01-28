@@ -185,15 +185,45 @@ Slack can be used at three different levels of complexity:
 - Same rich Block Kit formatting
 - Still informational only — no interactive response path back
 
-**Level 3: Full interactive (daemon required)**
+**Level 3: Full interactive (buttons + responses)**
 - Block Kit with native approve (green) / reject (red) / ask (neutral) buttons
 - **Threaded conversations** keep each permission request and its follow-up discussion neatly organized
 - Can edit the message after response to show "Approved by @you at 3:47 PM" and remove buttons
 - No public URL needed — uses Socket Mode (WebSocket)
-- **Requires a persistent daemon process** to receive button clicks and DM messages
 - See [SLACK-DEEP-DIVE.md](./SLACK-DEEP-DIVE.md) for full details
 
-**The key distinction**: sending to Slack is trivial (one HTTP POST). Receiving *back from* Slack is what requires the daemon. This is why a hybrid approach is appealing.
+**The key distinction**: sending to Slack is trivial (one HTTP POST). Receiving *back from* Slack requires Socket Mode (a WebSocket connection). The question is whether that WebSocket needs a long-lived daemon or if the hook script can handle it directly.
+
+### Does Slack Need a Daemon? Short-Lived vs Persistent Socket Mode
+
+The hook script *could* open a Socket Mode WebSocket connection itself, without a daemon. The flow would be:
+
+1. Hook fires
+2. Script calls `apps.connections.open` → gets a WebSocket URL (~200-300ms)
+3. Script opens WebSocket, receives `hello` message (~100-200ms)
+4. Script sends the interactive message via `chat.postMessage` (HTTP POST)
+5. User sees message on phone, clicks a button
+6. Slack delivers `block_actions` payload over the WebSocket
+7. Script acknowledges (sends `envelope_id` back), closes WebSocket
+8. Script returns allow/deny to Claude Code
+
+This works because the WebSocket is open before the user clicks, and the human response time (seconds to minutes) far exceeds the ~500ms connection setup. The `apps.connections.open` rate limit (~1/minute) is fine for a few-times-per-hour use case.
+
+**But there are real fragility concerns:**
+
+| Concern | Impact | Mitigation |
+|---|---|---|
+| WebSocket drops during the wait | Button click is lost — no reconnection in a short-lived script | Accept and fall back to timeout-deny |
+| `apps.connections.open` network failure | Can't connect at all for this request | Retry once, then fall back to ntfy-only |
+| Two permission requests within 1 minute | Second `apps.connections.open` may hit rate limit | Queue, or fall back to ntfy for the second |
+| Must handle raw WebSocket protocol | Ping/pong, envelope ack within 3 seconds, connection close frames | Use a minimal WS library, not the full Bolt SDK |
+| No SDK supports this pattern | Must write custom WebSocket handling | ~30 lines with raw `ws`/`websockets` library |
+
+**Nobody in the community uses Socket Mode this way.** Every example, tutorial, and SDK assumes a persistent process. Slack's own docs recommend HTTP mode for production reliability. But for a personal developer tool at low frequency, the short-lived approach is viable as a pragmatic tradeoff.
+
+**The daemon alternative** is ~40 lines of Python or Node.js (see [SLACK-DEEP-DIVE.md](./SLACK-DEEP-DIVE.md)). It runs in the background, uses minimal resources, and eliminates all the fragility concerns above. The hook script just writes/reads a local file or SQLite DB to communicate with it.
+
+**Recommendation**: Start with the short-lived approach for proof of concept (it's simpler to set up — no daemon to manage). If you hit reliability issues, upgrade to the daemon. The hook script code barely changes — you're just swapping "open WebSocket and wait" for "poll local file and wait".
 
 ### Hybrid: Slack for context + ntfy for decisions
 
