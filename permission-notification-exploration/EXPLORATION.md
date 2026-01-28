@@ -157,32 +157,58 @@ The `PermissionRequest` hook fires **when Claude Code is already waiting for a y
 
 ## Part 2: Notification Delivery Options
 
-See [notification-options/README.md](../permission-notification-research/README.md) for a detailed comparison of 8 notification services. Here's the short version:
+See [notification-options/README.md](../permission-notification-research/README.md) for a detailed comparison of 8 notification services. The three realistic options for this use case are ntfy.sh, Slack, and Telegram. WhatsApp was investigated and ruled out.
 
-### Top Two Options
-
-#### ntfy.sh — Best for simplicity and self-hosting
+### ntfy.sh — Best for simplicity and self-hosting
 
 - Send: `curl -d "message" ntfy.sh/your-topic`
 - Native approve/reject buttons via `http` actions
 - Response comes back via a second topic
 - Self-hostable, open source, free
 - No account needed for prototyping
+- **Limitation**: No conversational "ask a question" flow. Binary approve/reject only.
 
-#### Telegram Bot — Best for rich interaction
+### Slack — Best for rich interaction (if you already use it)
 
-- Inline keyboard buttons (approve/reject/more info)
-- Can edit the message after response ("Approved at 3:45 PM")
-- Threaded follow-up conversation possible
-- Free, no message limits
-- Requires Telegram app + bot setup
+- Block Kit produces polished, professional-looking notifications with styled buttons
+- Native approve (green) / reject (red) / ask (neutral) buttons
+- **Threaded conversations** keep each permission request and its follow-up discussion neatly organized — better than a flat chat when multiple requests are pending
+- Can edit the message after response to show "Approved by @you at 3:47 PM" and remove buttons
+- Works on a free Slack workspace (solo workspace is fine)
+- No public URL needed — uses Socket Mode (WebSocket)
+- **Key tradeoff**: Requires a **persistent daemon process** running alongside Claude Code to receive button clicks and DM messages. The hook script sends notifications, but a separate long-running process handles the response channel.
+- See [SLACK-DEEP-DIVE.md](./SLACK-DEEP-DIVE.md) for full details: setup, Block Kit formatting, Socket Mode, daemon architecture, and working code examples.
 
 ### Why Not the Others?
 
+- **WhatsApp** — Investigated in depth and **ruled out**. See below.
+- **Telegram** — Strong option if you use it. Inline keyboard buttons, message editing, conversational flow. No daemon needed (hook script can poll directly). We don't currently use it, so it would mean adding another app.
 - **Pushover** — No native multi-action buttons. Would need an external web page.
-- **Slack/Discord** — Good if your team already uses them, but heavyweight for a personal tool.
+- **Discord** — Requires a full bot application for interactive buttons. Overkill.
 - **Email/SMS** — Too slow and no native interactivity.
 - **Native app / PWA** — Massive overkill. Weeks of development for something ntfy does in 2 minutes.
+
+### WhatsApp — Why It Doesn't Work
+
+WhatsApp was investigated thoroughly as a notification channel since it's already installed and in regular use. The conclusion: **it is fundamentally designed for business-to-customer communication and is a poor fit for developer tooling**.
+
+The problems:
+
+1. **Business verification required** — The WhatsApp Business API requires a Meta Business Manager account with legal business documentation. Verification takes 1-14 business days. There's no "personal developer" tier.
+
+2. **Template messages** — Every outbound notification (the core of this use case) must use a pre-approved message template. You submit the template to Meta, wait for review, and can only use the exact approved format. Changing the format means resubmitting.
+
+3. **24-hour messaging window** — You can only send free-form messages within 24 hours of the user's last reply. Outside that window, you must use a (paid) template message. Since permission requests are unpredictable, you'd frequently be outside the window.
+
+4. **Webhook server mandatory** — Unlike Telegram (polling) or Slack (Socket Mode), WhatsApp has **no polling or WebSocket option**. You must run a publicly reachable HTTPS server with a valid SSL certificate to receive button taps and replies.
+
+5. **Per-message cost** — $0.01-0.05 per template message at US rates. Small but non-zero for something Slack does for free.
+
+6. **Only 3 buttons** — Quick reply messages support a maximum of 3 buttons with 20-character labels. Barely sufficient.
+
+7. **Unofficial alternatives are worse** — Libraries like whatsapp-web.js and Baileys that automate WhatsApp Web have **broken interactive button support** (WhatsApp actively patches against it), violate the Terms of Service, and carry real risk of permanent account bans. A malicious fork ("lotusbail") was discovered on npm in late 2025 that silently exfiltrated all WhatsApp authentication tokens and messages — the supply chain risk is real.
+
+**Bottom line**: To send yourself a notification with 3 buttons, you'd need business verification (weeks), a webhook server, template pre-approval, and per-message fees. Slack does the same thing with a free workspace, Socket Mode (no public URL), styled buttons, and zero per-message cost. There's no scenario where WhatsApp is the right choice for this.
 
 ---
 
@@ -896,17 +922,23 @@ If you wanted to build this for real, here's a phased approach:
 - Handle edge cases: what if the notification fails to send? What if ntfy is down?
 - Add a local log file of all permission decisions for audit
 
-### Phase 3: Production Quality (a week-ish)
+### Phase 3: Slack Integration
+
+- Create a Slack app with Socket Mode, Block Kit buttons, and DM support
+- Build the daemon process (Python Bolt or Node.js Bolt) that maintains the Socket Mode WebSocket and relays button clicks / DM messages to the hook script via local SQLite or file
+- Implement the "Ask" flow: button opens thread, user types question, daemon relays to hook script, hook denies with the question, Claude explains and retries
+- Support message updating after response (remove buttons, show "Approved by @you")
+- See [SLACK-DEEP-DIVE.md](./SLACK-DEEP-DIVE.md) for full architecture and working code examples
+
+### Phase 4: Production Quality
 
 - Self-host ntfy for security and reliability
-- Build a small web dashboard showing pending/recent permission requests
 - Add session context to notifications (project name, recent Claude activity)
 - Support multiple concurrent Claude Code sessions
-- Add a Telegram bot option for richer interaction
 - Create an installer script that sets up the hook and configures the notification service
 - Write tests for the hook script
 
-### Phase 4: Extras (if you want to go further)
+### Phase 5: Extras (if you want to go further)
 
 - Auto-learning: track which permissions you always approve, suggest adding them to the allow list
 - Time-based rules: allow more during work hours, restrict at night
@@ -1005,9 +1037,26 @@ The building blocks already exist:
 | Piece | Solution | Status |
 |---|---|---|
 | Hook into Claude Code | `PermissionRequest` hook | Built into Claude Code |
-| Send notification to phone | ntfy.sh or Telegram Bot | Existing services, trivial to integrate |
-| Get response back | ntfy response topics or Telegram callbacks | Supported natively |
-| Approve/reject from phone | Action buttons in notification | Supported by ntfy and Telegram |
+| Rich context for decisions | Parse `transcript_path` JSONL for reasoning, original prompt, recent activity | Available via hook payload |
+| Send notification to phone | ntfy.sh (simple) or Slack (rich) | Existing services |
+| Interactive approve/reject/ask | ntfy HTTP action buttons or Slack Block Kit buttons | Supported natively |
+| Get response back | ntfy response topics or Slack Socket Mode daemon | Supported natively |
+| "Ask for more context" flow | Deny with question → Claude explains → retries with explanation in transcript | Works with Claude Code's existing behavior |
 | Gate Claude Code on the response | Hook script blocks and returns allow/deny | Standard hook behavior |
 
-The gap isn't technical — it's just glue. A single shell script (~30 lines) bridges Claude Code's hook system to a push notification service. The proof of concept is an afternoon's work. The polished version is a weekend project.
+### Recommended path for us
+
+| Phase | What | Notification Channel |
+|---|---|---|
+| **1. Proof of concept** | Minimal hook script, basic approve/reject | ntfy.sh |
+| **2. Rich context** | Transcript parsing, context extractor, "More Info" | ntfy.sh |
+| **3. Conversational approval** | Slack app + daemon, "Ask" flow with threads, message editing | Slack |
+| **4. Polish** | Self-hosted ntfy, concurrent session support, audit log | Both |
+
+### What we ruled out
+
+- **WhatsApp** — Business verification (weeks), mandatory webhook server, template pre-approval, per-message cost, 24-hour messaging window, max 3 buttons. Fundamentally designed for B2C, not developer tooling.
+- **Telegram** — Technically strong but we don't use it. Would mean adding another app.
+- **Native app / PWA** — Massive overkill for something a hook script + notification service handles.
+
+The gap isn't technical — it's just glue. A shell script bridges Claude Code's hook system to a push notification service. The proof of concept is an afternoon's work. The Slack integration with conversational "ask for more context" is a weekend project.

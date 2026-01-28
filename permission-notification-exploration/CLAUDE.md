@@ -7,6 +7,7 @@ An exploration/research project investigating how to build a notification system
 ## Key Files
 
 - `EXPLORATION.md` — Main exploration document covering Claude Code hooks, notification delivery options, end-to-end architecture, open questions, and a quick-start recipe
+- `SLACK-DEEP-DIVE.md` — Comprehensive research on Slack as an interactive notification/approval platform (Socket Mode, Block Kit, threading, daemon architecture, comparison with Telegram/ntfy)
 - `../permission-notification-research/README.md` — Detailed comparison of 8 push notification services (Pushover, ntfy.sh, Telegram, Discord, Slack, PWA, native app, email/SMS)
 
 ## Status
